@@ -7,34 +7,91 @@ import (
 	"testing"
 )
 
-func TestBtrfsUsage1(t *testing.T) {
-	// Get input
-	path := "/mnt/btrfs"
-	// var freeLimitPercentage uint64 = 60
-	freeLimitPercentage := uint64(60)
-	cmdOutUsageRaw, err := ioutil.ReadFile("testdata/input-usage-raw1.txt")
-	if err != nil {
-		log.Fatal(err)
-	}
-	cmdOutUsageHuman, err := ioutil.ReadFile("testdata/input-usage-human1.txt")
-	if err != nil {
-		log.Fatal(err)
-	}
+const defaultPath = "/mnt/btrfs"
 
-	// Run test
-	usg := usage{}
-	usg.extractBtrfsUsageData(cmdOutUsageRaw, cmdOutUsageHuman)
-	if err != nil {
-		t.Errorf("%v", err)
-	}
-	warning := usg.getUsageWarning(path, freeLimitPercentage)
+type TestData struct {
+	path                string
+	rawInputFile        string
+	humanInputFile      string
+	freeLimitPercentage uint64
 
-	// Check result
-	expected, err := ioutil.ReadFile("testdata/output-warning1.txt")
-	if err != nil {
-		log.Fatal(err)
-	}
-	if strings.Compare(warning, string(expected)) != 0 {
-		t.Errorf("\nExpected: %sGot:      %s", expected, warning)
+	expectedOutputFile string
+}
+
+func TestBtrfsUsage(t *testing.T) {
+	var (
+		dataSet = []TestData{
+			{defaultPath, "testdata/input-usage-raw-zero-size.txt", "testdata/input-usage-human-zero-size.txt", 0, "testdata/output-warning-zero-size.txt"},
+			{defaultPath, "testdata/input-usage-raw1.txt", "testdata/input-usage-human1.txt", 60, "testdata/output-warning1.txt"},
+		}
+	)
+
+	for i := 0; i < len(dataSet); i++ {
+		data := dataSet[i]
+
+		// Get input.
+		freeLimitPercentage := data.freeLimitPercentage
+		cmdOutUsageRaw, err := ioutil.ReadFile(data.rawInputFile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		cmdOutUsageHuman, err := ioutil.ReadFile(data.humanInputFile)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// Run test.
+		usg := usage{}
+		usg.extractUsage(cmdOutUsageRaw, cmdOutUsageHuman)
+		if err != nil {
+			t.Fatal(err)
+		}
+		warning := usg.usageWarning(data.path, freeLimitPercentage)
+
+		// Check result.
+		expected, err := ioutil.ReadFile(data.expectedOutputFile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if strings.Compare(warning, string(expected)) != 0 {
+			t.Errorf("\nExpected: %sGot:      %s", expected, warning)
+		}
 	}
 }
+
+// func TestBtrfsPanic(t *testing.T) {
+// 	var (
+// 		dataSet = []TestData{
+// 			{defaultPath, "testdata/input-usage-raw-zero-size.txt", "testdata/input-usage-human-zero-size.txt", 0, ""},
+// 		}
+// 	)
+//
+// 	defer func() {
+// 		if r := recover(); r == nil {
+// 			t.Errorf("Expected panic")
+// 		}
+// 	}()
+//
+// 	for i := 0; i < len(dataSet); i++ {
+// 		data := dataSet[i]
+//
+// 		// Get input.
+// 		freeLimitPercentage := data.freeLimitPercentage
+// 		cmdOutUsageRaw, err := ioutil.ReadFile(data.rawInputFile)
+// 		if err != nil {
+// 			log.Fatal(err)
+// 		}
+// 		cmdOutUsageHuman, err := ioutil.ReadFile(data.humanInputFile)
+// 		if err != nil {
+// 			log.Fatal(err)
+// 		}
+//
+// 		// Run test.
+// 		usg := usage{}
+// 		err = usg.extractUsage(cmdOutUsageRaw, cmdOutUsageHuman)
+// 		if err != nil {
+// 			t.Fatal(err)
+// 		}
+// 		usg.usageWarning(data.path, freeLimitPercentage)
+// 	}
+// }

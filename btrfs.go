@@ -12,22 +12,23 @@ import (
 	"strings"
 )
 
-// BtrfsUsage prints a warning if Btrfs data usage drops below the free limit percentage.
-func BtrfsUsage(path string, freeLimitPercentage uint64) error {
-	cmdOutUsageRaw, err := runBtrfsUsageRaw(path)
+// BtrfsUsage prints a warning if Btrfs filesystem data usage drops below the free limit percentage.
+// Path is the Btrfs filesystem location.
+func BtrfsUsage(config *Config, path string, freeLimitPercentage uint64) error {
+	cmdOutUsageRaw, err := usageRaw(config, path)
 	if err != nil {
 		return err
 	}
-	cmdOutUsageHuman, err := runBtrfsUsageHuman(path)
+	cmdOutUsageHuman, err := usageHuman(config, path)
 	if err != nil {
 		return err
 	}
 
 	usg := usage{}
-	if err := usg.extractBtrfsUsageData(cmdOutUsageRaw, cmdOutUsageHuman); err != nil {
+	if err := usg.extractUsage(cmdOutUsageRaw, cmdOutUsageHuman); err != nil {
 		return err
 	}
-	fmt.Printf("%s", usg.getUsageWarning(path, freeLimitPercentage))
+	fmt.Printf("%s", usg.usageWarning(path, freeLimitPercentage))
 
 	return nil
 }
@@ -35,18 +36,23 @@ func BtrfsUsage(path string, freeLimitPercentage uint64) error {
 //
 
 type usage struct {
-	// Raw Btrfs data usage in bytes.
-	//freeMin uint64
+	// Raw Btrfs filesystem data usage in bytes.
+	// freeMin uint64
 	deviceSize, free uint64
 
-	// Human readable Btrfs data usage (e.g., 1K 234M 2G).
+	// Human readable Btrfs filesystem data usage (e.g., 1K 234M 2G).
 	// deviceSizeStr string
 	freeStr, freeMinStr string
 }
 
-// Returns raw Btrfs data usage in bytes.
-func runBtrfsUsageRaw(path string) ([]byte, error) {
-	cmd := exec.Command("btrfs", "filesystem", "usage", "--raw", path)
+// Returns raw Btrfs filesystem data usage in bytes.
+func usageRaw(config *Config, path string) ([]byte, error) {
+	command := "btrfs"
+	args := []string{"filesystem", "usage", "--raw", path}
+	if config.Debug {
+		fmt.Fprintf(os.Stderr, "DEBUG: executing: %s %s\n", command, args)
+	}
+	cmd := exec.Command(command, args...)
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
 	out, err := cmd.Output()
@@ -62,9 +68,14 @@ func runBtrfsUsageRaw(path string) ([]byte, error) {
 	return out, nil
 }
 
-// Returns human-readable Btrfs data usage.
-func runBtrfsUsageHuman(path string) ([]byte, error) {
-	cmd := exec.Command("btrfs", "filesystem", "usage", path)
+// Returns human-readable filesystem Btrfs data usage.
+func usageHuman(config *Config, path string) ([]byte, error) {
+	command := "btrfs"
+	args := []string{"filesystem", "usage", path}
+	if config.Debug {
+		fmt.Fprintf(os.Stderr, "DEBUG: executing: %s %s\n", command, args)
+	}
+	cmd := exec.Command(command, args...)
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
 	out, err := cmd.Output()
@@ -80,8 +91,8 @@ func runBtrfsUsageHuman(path string) ([]byte, error) {
 	return out, nil
 }
 
-// Collects and stores Btrfs usage data.
-func (usg *usage) extractBtrfsUsageData(cmdOutUsageRaw []byte, cmdOutUsageHuman []byte) error {
+// Collects Btrfs filesystem filesystem data usage.
+func (usg *usage) extractUsage(cmdOutUsageRaw []byte, cmdOutUsageHuman []byte) error {
 	scanner := bufio.NewScanner(bytes.NewReader(cmdOutUsageRaw))
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -109,6 +120,11 @@ func (usg *usage) extractBtrfsUsageData(cmdOutUsageRaw []byte, cmdOutUsageHuman 
 			if err != nil {
 				return err
 			}
+			// if s == 0 {
+			// 	// panic("btrfs: device size is 0")
+			// 	return errors.New("btrfs: device size is 0")
+			// }
+
 			usg.deviceSize = s
 		}
 
@@ -132,12 +148,6 @@ func (usg *usage) extractBtrfsUsageData(cmdOutUsageRaw []byte, cmdOutUsageHuman 
 	}
 	if err := scanner.Err(); err != nil {
 		return err
-	}
-
-	// if usg.deviceSize == 0 || usg.free == 0 || usg.freeMin == 0 {
-	if usg.deviceSize == 0 || usg.free == 0 {
-		// panic("parse error")
-		return errors.New("usage data parse error")
 	}
 
 	//
@@ -171,16 +181,16 @@ func (usg *usage) extractBtrfsUsageData(cmdOutUsageRaw []byte, cmdOutUsageHuman 
 
 	// if usg.deviceSizeStr == "" || usg.freeStr == "" || usg.freeMinStr == "" {
 	if usg.freeStr == "" || usg.freeMinStr == "" {
-		// panic("parse error")
-		return errors.New("usage data parse error")
+		// panic("parse error in filesystem data usage: at 'Free (estimated)'")
+		return errors.New("parse error in filesystem data usage: at 'Free (estimated)'")
 	}
 
 	return nil
 }
 
-// Returns a warning if Btrfs data usage drops below the free limit percentage.
+// Returns a warning if Btrfs filesystem data usage drops below the free limit percentage.
 // func (u *usage) ...
-func (usg usage) getUsageWarning(path string, freeLimitPercentage uint64) string {
+func (usg usage) usageWarning(path string, freeLimitPercentage uint64) string {
 	// if debug {
 	// 	fmt.Fprintf(os.Stderr, "Device size: %s (%d)\n", usg.deviceSizeStr, usg.deviceSize)
 	// 	fmt.Fprintf(os.Stderr, "Free : %s (%d)\n", usg.freeStr, usg.free)
@@ -188,14 +198,21 @@ func (usg usage) getUsageWarning(path string, freeLimitPercentage uint64) string
 	// }
 
 	if usg.deviceSize == 0 {
-		// return ""
-		panic("runtime error: integer divide by zero")
+		// // return ""
+		// panic("runtime error: integer divide by zero")
+		return fmt.Sprintf("ERROR: %s: device size is 0\n", path)
+	}
+
+	if freeLimitPercentage < 0 {
+		freeLimitPercentage = 0
+	} else if freeLimitPercentage > 100 {
+		freeLimitPercentage = 100
 	}
 
 	freePercentage := (usg.free * 100) / usg.deviceSize
 	if freePercentage < freeLimitPercentage {
-		// return fmt.Sprintf("WARNING %s: %d (min: %d)\n", path, usg.free, usg.freeMin)
-		return fmt.Sprintf("WARNING %s free: %s (min: %s), %d%% (limit: %d%%)\n",
+		// return fmt.Sprintf("WARNING: %s, %d (min: %d)\n", path, usg.free, usg.freeMin)
+		return fmt.Sprintf("WARNING: %s, free: %s (min: %s), %d%% (limit: %d%%)\n",
 			path, usg.freeStr, usg.freeMinStr, freePercentage, freeLimitPercentage)
 	}
 
